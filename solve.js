@@ -114,17 +114,28 @@ function keyVal(key, raw) {
 }
 
 function parseFM(text) {
-  const lines = text.split('\n');
-  if (lines[0] !== '---') return { error: 'no front matter' };
-  let close = -1;
-  for (let i = 1; i < lines.length; i++) if (lines[i] === '---') { close = i; break; }
-  if (close === -1) return { error: 'the front matter is not closed' };
+  // First line must be exactly '---'.
+  if (text !== '---' && !text.startsWith('---\n')) return { error: 'no front matter' };
+  if (text === '---') return { error: 'the front matter is not closed' };
+  // Close is the next line that is exactly '---': search for '\n---' followed by '\n' or end.
+  let closeIdx = -1, closeEnd = -1;
+  let at = 3;
+  while (true) {
+    const j = text.indexOf('\n---', at);
+    if (j === -1) break;
+    const after = j + 4;
+    if (after === text.length || text[after] === '\n') { closeIdx = j; closeEnd = after === text.length ? after : after + 1; break; }
+    at = j + 1;
+  }
+  if (closeIdx === -1) return { error: 'the front matter is not closed' };
+  const fmText = text.slice(4, closeIdx);
+  const lines = fmText === '' ? [] : fmText.split('\n');
   const data = {};
-  for (let i = 1; i < close; i++) {
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/^[ \t]*$/.test(line) || line[0] === '#') continue;
     const m = LINE_RE.exec(line);
-    if (!m) return { error: 'line ' + (i + 1) + ' is not "key: value"' };
+    if (!m) return { error: 'line ' + (i + 2) + ' is not "key: value"' };
     const key = m[1];
     const raw = (m[2] ?? '').replace(/[ \t]+$/, '');
     if (!KEYS.has(key)) return { error: 'unknown key "' + key + '"' };
@@ -135,7 +146,7 @@ function parseFM(text) {
     data[key] = v.value;
   }
   if (!Object.hasOwn(data, 'title')) return { error: 'no title' };
-  return { data, body: lines.slice(close + 1).join('\n') };
+  return { data, body: text.slice(closeEnd) };
 }
 
 // ---- markdown ----
@@ -468,8 +479,15 @@ const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 const SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 
 function wordsOf(text) {
-  const m = text.match(/\S+/g);
-  return m === null ? 0 : m.length;
+  let n = 0, inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    // ASCII whitespace: space, \t, \n, \v, \f, \r; anything else non-ASCII falls back to a \s test on the char.
+    const ws = c === 32 || c === 9 || c === 10 || c === 11 || c === 12 || c === 13 || (c > 127 && /\s/.test(text[i]));
+    if (ws) inWord = false;
+    else if (!inWord) { inWord = true; n++; }
+  }
+  return n;
 }
 
 export function run(input) {
